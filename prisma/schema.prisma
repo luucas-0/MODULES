@@ -1,0 +1,156 @@
+generator client {
+  provider   = "prisma-client"
+  output     = "../generated/prisma"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum AccountStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum ScheduleStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum AuditAction {
+  // Auth
+  LOGIN
+  LOGOUT
+  PASSWORD_CHANGE
+
+  // Usuarios
+  USER_CREATED
+  USER_UPDATED
+  USER_DELETED
+  ROLE_CHANGED
+
+  // Horarios
+  SCHEDULE_CREATED
+  SCHEDULE_UPDATED
+  SCHEDULE_DELETED
+}
+
+// ============================================================
+// TABLA: users
+// ============================================================
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique
+  passwordHash String        @map("password_hash")
+  firstName    String        @map("first_name")
+  lastName     String        @map("last_name")
+  role         Role          @default(EMPLOYEE)
+  status       AccountStatus @default(ACTIVE)
+  managerId    String?       @map("manager_id") @db.Uuid
+  lastLogin    DateTime?     @map("last_login")
+  deletedAt    DateTime?     @map("deleted_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  // Relaciones
+  manager          User?      @relation("ManagerEmployees", fields: [managerId], references: [id])
+  employees        User[]     @relation("ManagerEmployees")
+  schedules        Schedule[] @relation("ScheduleOwner")
+  createdSchedules Schedule[] @relation("ScheduleCreator")
+  auditLogs        AuditLog[] @relation("AuditSubject")
+  auditActions     AuditLog[] @relation("AuditActor")
+
+  @@index([email, deletedAt])
+  @@index([role, status])
+  @@index([managerId])
+  @@map("users")
+}
+
+// ============================================================
+// TABLA: schedules
+// ============================================================
+
+model Schedule {
+  id          String         @id @default(uuid()) @db.Uuid
+  ownerId     String         @map("owner_id") @db.Uuid // a quién pertenece el horario
+  createdById String         @map("created_by_id") @db.Uuid // quién lo creó
+  title       String
+  description String?        @db.Text
+  startTime   DateTime       @map("start_time")
+  endTime     DateTime       @map("end_time")
+  status      ScheduleStatus @default(ACTIVE)
+  deletedAt   DateTime?      @map("deleted_at") // soft delete
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  // Relaciones
+  owner     User @relation("ScheduleOwner", fields: [ownerId], references: [id])
+  createdBy User @relation("ScheduleCreator", fields: [createdById], references: [id])
+
+  @@index([ownerId, status])
+  @@index([startTime, endTime])
+  @@index([ownerId, startTime, endTime]) // detección de conflictos
+  @@map("schedules")
+}
+
+// ============================================================
+// TABLA: audit_logs
+// ============================================================
+
+model AuditLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String      @map("user_id") @db.Uuid // usuario afectado
+  actorId   String?     @map("actor_id") @db.Uuid // quien hizo la acción
+  action    AuditAction
+  tableName String      @map("table_name")
+  recordId  String      @map("record_id")
+  oldValues Json?       @map("old_values")
+  newValues Json?       @map("new_values")
+  ipAddress String?     @map("ip_address")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  subject User  @relation("AuditSubject", fields: [userId], references: [id])
+  actor   User? @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+model RoleMetadata {
+  id          String        @id @default(uuid()) @db.Uuid
+  role        Role          @unique
+  name        String
+  description String?       @db.Text
+  status      AccountStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  @@map("role_metadata")
+}
+
+model Permission {
+  id        String   @id @default(uuid()) @db.Uuid
+  action    String
+  module    String
+  role      Role
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([action, module, role], map: "action_module_role_unique")
+  @@map("permissions")
+}
